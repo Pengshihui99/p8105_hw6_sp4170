@@ -206,27 +206,42 @@ colSums(is.na(bw_df))
 ## fit my model
 
 * step 1
-  * from my opinion, i suppose the main effect of (1) presence of malformations that could affect weight (malform), (2) mother’s race (mrace), (3) father’s race (frace), (4) average number of cigarettes smoked per day during pregnancy (smoken), and (5) gestational age in weeks (gaweeks), will affect the baby’s birth weight. therefore, i fit a mixed linear regression model `fit`
+  * from my opinion, i suppose the main effect of (1) presence of malformations that could affect weight (malform), (2) mother’s race (mrace), (3) father’s race (frace), (4) average number of cigarettes smoked per day during pregnancy (smoken), (5) gestational age in weeks (gaweeks), and (6) baby’s head circumference at birth (bhead), will affect the baby’s birth weight. therefore, i fit a mixed linear regression model `fit1`
   * but i find that the r^2 is pretty low, so i decide to add a new covariant.
 * step 2
-  * i decide to add one more covariant (6) baby’s length at birth (blength) into the model `fit`
+  * i decide to add one more covariant (7) baby’s length at birth (blength) into the model `fit1`, and the new model is `fit2`
   * r^2 greatly increase, so i decide to keep variable `blength` into my mode.
 * step 3
-  * based on step 2 parameter estimates output, i find that the variable `malform` is not significant. so, i remove it from the model, and find that the r^2 does not change. To keep my model less complex, i decide to remove the variable `malform`, and here it comes my final model: `bwt ~ mrace + frace + smoken + gaweeks + blength`
+  * based on step 2 parameter estimates output, i find that the variable `malform` is not significant. so, i remove it from the model, and find that the r^2 does not change. To keep my model less complex, i decide to remove the variable `malform`, and here it comes my final model `fit`: `bwt ~ mrace + frace + smoken + gaweeks + blength`
 ```{r}
-fit = lm(bwt ~ malform + mrace + frace + smoken + gaweeks, data = bw_df)
+fit1 = lm(bwt ~ malform + mrace + frace + smoken + gaweeks + bhead, data = bw_df)
+
+broom::tidy(fit1) |> knitr::kable()
+broom::glance(fit1) |> knitr::kable()
+
+fit2 = lm(bwt ~ malform + mrace + frace + smoken + gaweeks + bhead + blength, data = bw_df)
+
+broom::tidy(fit2) |> knitr::kable()
+broom::glance(fit2) |> knitr::kable()
+
+fit = lm(bwt ~ mrace + frace + smoken + gaweeks + blength + bhead, data = bw_df)
 
 broom::tidy(fit) |> knitr::kable()
-broom::glance(fit)
-
-fit = lm(bwt ~ malform + mrace + frace + smoken + gaweeks + blength, data = bw_df)
-
-broom::tidy(fit) |> knitr::kable()
-broom::glance(fit)
-
-fit = lm(bwt ~ mrace + frace + smoken + gaweeks + blength, data = bw_df)
-
-broom::tidy(fit) |> knitr::kable()
-broom::glance(fit)
+broom::glance(fit) |> knitr::kable()
 ```
+
+## show a plot of model residuals against fitted values based on my model `fit`
+
+```{r}
+bw_df |> 
+  select(bwt, mrace, frace, smoken, gaweeks, blength, bhead) |> 
+  add_predictions(fit) |> 
+  add_residuals(fit) |> 
+  ggplot(aes(y = resid, x = pred)) + geom_point(alpha = 0.5) +
+  labs(x = "fitted value", y = "residuals", title = "residuals against fitted values")
+```
+
+* based on this plot, we can see some fitted values have large residuals, so maybe there are outliers when we use model fit for prediction. Since some residuals are pretty large, we cannot say that the model fit is the best fitted model for this dataset. 
+
+
 
