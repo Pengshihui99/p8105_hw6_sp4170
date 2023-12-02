@@ -8,7 +8,6 @@ load packages and basic settings..
 ```{r, message=FALSE, echo=FALSE}
 library(tidyverse)
 library(modelr)
-library(ggplot2)
 set.seed(1)
 
 knitr::opts_chunk$set(
@@ -29,6 +28,82 @@ scale_fill_discrete = scale_fill_viridis_d
 ```
 
 
+# Problem 1
+
+In the data cleaning code below we create a `city_state` variable, change `victim_age` to numeric, modifiy victim_race to have categories white and non-white, with white as the reference category, and create a `resolution` variable indicating whether the homicide is solved. Lastly, we filtered out the following cities: Tulsa, AL; Dallas, TX; Phoenix, AZ; and Kansas City, MO; and we retained only the variables `city_state`, `resolution`, `victim_age`, `victim_sex`, and `victim_race`.
+
+```{r q1_data_cleaning}
+homicide_df = 
+  read_csv("data/homicide-data.csv", na = c("", "NA", "Unknown")) |> 
+  mutate(
+    city_state = str_c(city, state, sep = ", "),
+    victim_age = as.numeric(victim_age),
+    resolution = case_when(
+      disposition == "Closed without arrest" ~ 0,
+      disposition == "Open/No arrest"        ~ 0,
+      disposition == "Closed by arrest"      ~ 1)
+  ) |> 
+  filter(victim_race %in% c("White", "Black")) |> 
+  filter(!(city_state %in% c("Tulsa, AL", "Dallas, TX", "Phoenix, AZ", "Kansas City, MO"))) |> 
+  select(city_state, resolution, victim_age, victim_sex, victim_race)
+```
+
+Next we fit a logistic regression model using only data from Baltimore, MD. We model `resolved` as the outcome and `victim_age`, `victim_sex`, and `victim_race` as predictors. We save the output as `baltimore_glm` so that we can apply `broom::tidy` to this object and obtain the estimate and confidence interval of the adjusted odds ratio for solving homicides comparing non-white victims to white victims.
+
+```{r q1_glm_baltimore}
+baltimore_glm = 
+  filter(homicide_df, city_state == "Baltimore, MD") |> 
+  glm(resolution ~ victim_age + victim_sex + victim_race, family = binomial(), data = _)
+
+baltimore_glm |> 
+  broom::tidy() |> 
+  mutate(
+    OR = exp(estimate), 
+    OR_CI_upper = exp(estimate + 1.96 * std.error),
+    OR_CI_lower = exp(estimate - 1.96 * std.error)) |> 
+  filter(term == "victim_sexMale") |> 
+  select(OR, OR_CI_lower, OR_CI_upper) |>
+  knitr::kable(digits = 3)
+```
+
+Below, by incorporating `nest()`, `map()`, and `unnest()` into the preceding Baltimore-specific code, we fit a model for each of the cities, and extract the adjusted odds ratio (and CI) for solving homicides comparing non-white victims to white victims. We show the first 5 rows of the resulting dataframe of model results.
+
+```{r q1_glm_all_cities}
+model_results = 
+  homicide_df |> 
+  nest(data = -city_state) |> 
+  mutate(
+    models = map(data, \(df) glm(resolution ~ victim_age + victim_sex + victim_race, 
+                             family = binomial(), data = df)),
+    tidy_models = map(models, broom::tidy)) |> 
+  select(-models, -data) |> 
+  unnest(cols = tidy_models) |> 
+  mutate(
+    OR = exp(estimate), 
+    OR_CI_upper = exp(estimate + 1.96 * std.error),
+    OR_CI_lower = exp(estimate - 1.96 * std.error)) |> 
+  filter(term == "victim_sexMale") |> 
+  select(city_state, OR, OR_CI_lower, OR_CI_upper)
+
+model_results |>
+  slice(1:5) |> 
+  knitr::kable(digits = 3)
+```
+
+Below we generate a plot of the estimated ORs and CIs for each city, ordered by magnitude of the OR from smallest to largest. From this plot we see that most cities have odds ratios that are smaller than 1, suggesting that crimes with male victims have smaller odds of resolution compared to crimes with female victims after adjusting for victim age and race. This disparity is strongest in New yrok. In roughly half of these cities, confidence intervals are narrow and do not contain 1, suggesting a significant difference in resolution rates by sex after adjustment for victim age and race. 
+
+```{r q1_plot}
+model_results |> 
+  mutate(city_state = fct_reorder(city_state, OR)) |> 
+  ggplot(aes(x = city_state, y = OR)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = OR_CI_lower, ymax = OR_CI_upper)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+
+
 # Problem 2
 
 ## load Central Park weather data
@@ -47,49 +122,13 @@ weather_df =
   select(name, id, everything())
 ```
 
-## draw 5000 samples from weather_df
-
-I first create a function for sampling rows with size as large as 100% of the weather_df from weather_df. Then i iterate and create 5000 samples from weather_df using this function.
-```{r}
-boot_samp = function(df){
-  sample_frac(df, replace = TRUE)
-}
-
-boot_strap =
-  tibble(
-    strap_number = 1:5000
-  ) |> 
-  mutate(
-    strap_sample = map(strap_number, \(i) boot_samp(weather_df))
-  )
-```
-
 ## question 1: log(beta1_hat∗beta2_hat)
 
-i first fit a linear regression model with y = tmax and covariants including tmin and prcp for my created 5000 samples. Then i use broom::tidy and unnest() to get estimates for tmins and prcps, select relevant columns and unnest the list. I use pivot_wider to allow the calculation between different rows within one column (that is, calculate log of products of estimates of tmin and estiamtes of prcps). then, i use mutate to calculate log(beta1_hat x beta2_hat), and draw a density plot based on the estimates of log(beta1_hat x beta2_hat). then, i calculate the 95%CI for log(beta1_hat x beta2_hat) estimates.
+i first fit a linear regression model with y = tmax and covariants including tmin and prcp for my created 5000 samples (using bootstrap in modelr package). Then i use broom::tidy and unnest() to get estimates for tmins and prcps, select relevant columns and unnest the list. I use pivot_wider to allow the calculation between different rows within one column (that is, calculate log of products of estimates of tmin and estiamtes of prcps). then, i use mutate to calculate log(beta1_hat x beta2_hat), and draw a density plot based on the estimates of log(beta1_hat x beta2_hat). then, i calculate the 95%CI for log(beta1_hat x beta2_hat) estimates.
 
 ### fit linear regression and get log(beta1_hat∗beta2_hat) estimates
 
 ```{r}
-boot_result_para =
-  boot_strap |> 
-  mutate(
-    model = map(strap_sample, \(df) lm(tmax ~ tmin + prcp, data = df)),
-    result_para = map(model, broom::tidy)
-  ) |> 
-  select(strap_number, result_para) |> 
-  unnest(result_para) |> 
-  select(strap_number, term, estimate) |> 
-  pivot_wider(
-    names_from = term,
-    values_from = estimate
-  ) |> 
-  mutate(
-    log_b1b2 = log(tmin * prcp)
-  )
-
-# or this method????
-
 boot_result_para =
   bootstrap(weather_df, 5000, id = "strap_number") |> 
   mutate(
@@ -118,8 +157,8 @@ boot_result_para |>
 descriptions: 
 
 * the distribution of the log(beta1_hat x beta2_hat) is highly left-skewed.
-* the peak of the log(beta1_hat x beta2_hat) distribution is around -5.5, and the majority of the estimated log(beta1_hat x beta2_hat) value lies between -8.2 and -4.2.
-* it is worth to notice that some values of beta1_hat x beta2_hat is negative, so we cannot calculate the log of them. in this case, this part of data is removed when we draw the density plot for estimated log(beta1_hat x beta2_hat).
+* the peak of the log(beta1_hat x beta2_hat) distribution is around -5.8, and the majority of the estimated log(beta1_hat x beta2_hat) value lies between -8.2 and -4.4.(observed by eye)
+* it is worth noticing that some values of beta1_hat x beta2_hat is negative, so we cannot calculate the log of them. in this case, this part of data is removed when we draw the density plot for estimated log(beta1_hat x beta2_hat).
   * for more details, `r boot_result_para |> filter(log_b1b2 != "NaN") |> count()` out of `r boot_result_para |> count()` rows are used when drawing the plot.
 
 ### calculate 95%CI for r^2 estimates
@@ -139,15 +178,15 @@ boot_result_para |>
 
 ## question 2: r^2
 
-i first fit a linear regression model with y = tmax and covariants including tmin and prcp for my created 5000 samples. then, i use broom::glance to give r^2 values, select relevant columns and unnest the list. then, i draw a density plot based on the estimates of r^2. then, i calculate the 95%CI for r^2 estimates.
+i first fit a linear regression model with y = tmax and covariants including tmin and prcp for my created 5000 samples using bootstrap() in modelr package. then, i use broom::glance to give r^2 values, select relevant columns and unnest the list. then, i draw a density plot based on the estimates of r^2. then, i calculate the 95%CI for r^2 estimates.
 
 ### fit linear regression and get r^2 estimates
 
 ```{r}
 boot_result_r2 =
-  boot_strap |> 
+  bootstrap(weather_df, 5000, id = "strap_number") |> 
   mutate(
-    model = map(strap_sample, \(df) lm(tmax ~ tmin + prcp, data = df)),
+    model = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df)),
     result_r2 = map(model, broom::glance)
   ) |> 
   select(strap_number, result_r2) |> 
@@ -163,7 +202,7 @@ boot_result_r2 |>
 descriptions: 
 
 * the distribution of r^2 is slightly left-skewed.
-* the peak of the r^2 distribution is around 0.916, and the majority of the estimated r^2 value lies between 0.886 and 0.932.
+* the peak of the r^2 distribution is around 0.92, and the majority of the estimated r^2 value lies between 0.885 and 0.943. (observed by eye)
 
 ### calculate 95%CI for r^2 estimates
 
@@ -181,7 +220,6 @@ boot_result_r2 |>
 * since the 95%CI is not wide and with relatively large value, we might say the model can make good prediction when we do bootstrap to infer r^2
 
 
-
 # Problem 3
 
 ## data import, clean, and mutate
@@ -195,8 +233,7 @@ bw_df =
     malform = case_when(malform == 0 ~ "absent", malform == 1 ~ "present"),
     mrace = factor(mrace, levels = c(1,2,3,4,8), labels = c("White", "Black", "Asian", "Puerto Rican", "Other")),
     frace = factor(frace, levels = c(1,2,3,4,8,9), labels = c("White", "Black", "Asian", "Puerto Rican", "Other", "Unknow"))
-  ) |> 
-  drop_na(bwt)
+  )
 
 colSums(is.na(bw_df))
 ```
@@ -239,9 +276,12 @@ bw_df |>
   add_residuals(my_fit) |> 
   ggplot(aes(y = resid, x = pred)) + geom_point(alpha = 0.5) +
   labs(x = "fitted value", y = "residuals", title = "residuals against fitted values, based on model `my_fit`")
+
 ```
 
-* based on this plot, we can see some fitted values have large residuals, so maybe there are outliers when we use model fit for prediction. Since some residuals are pretty large, we cannot say that the model fit is the best fitted model for this dataset. 
+* based on this output plot, we can see that there are lots of points around x-axis (0 line of the residuals axis), which indicates a relatively good prediction when using my model. however, when fitted value increases, we can see a trend that the absolute value of residuals kind of increases, so there might be a heteroscedasticity problem for residuals, which indicates the variance of residuals is not constant across the dataset.
+* however, we can see some fitted values have large residuals, so maybe there are outliers when we use model fit for prediction. we need to take a further step to see whether these outliers are influential observations for this model.
+
 
 ## compare my model `fit` with other two models
 
