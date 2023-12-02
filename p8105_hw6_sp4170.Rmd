@@ -1,0 +1,6 @@
+---
+title: "p8105_hw6_sp4170"
+author: "Shihui Peng"
+date: "2023-12-02"
+output: github_document
+---
